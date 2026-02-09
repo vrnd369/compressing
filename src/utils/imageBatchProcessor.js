@@ -10,27 +10,27 @@ import { compressImage, formatFileSize } from './base64ImageStorage';
  */
 export async function processBatchImages(images, compressionOptions, onProgress) {
   const results = [];
-  
+
   for (let i = 0; i < images.length; i++) {
     const image = images[i];
-    
+
     try {
       if (onProgress) {
         onProgress(i + 1, images.length);
       }
-      
-      const result = await compressImage(image.dataUrl, compressionOptions);
-      
+
+      const result = await compressImage(image.file || image.dataUrl, compressionOptions);
+
       // Determine file extension based on format
       const format = compressionOptions.format || 'image/jpeg';
-      const extension = format === 'image/png' ? 'png' : 
-                       format === 'image/webp' ? 'webp' : 'jpg';
-      
+      const extension = format === 'image/png' ? 'png' :
+        format === 'image/webp' ? 'webp' : 'jpg';
+
       // Extract filename without extension
       const originalName = image.name || `image_${i + 1}`;
       const nameWithoutExt = originalName.replace(/\.[^/.]+$/, '');
-      const compressedFileName = `${nameWithoutExt}_compressed.${extension}`;
-      
+      const compressedFileName = `${nameWithoutExt}.${extension}`;
+
       results.push({
         originalName: image.name,
         fileName: compressedFileName,
@@ -51,7 +51,7 @@ export async function processBatchImages(images, compressionOptions, onProgress)
       });
     }
   }
-  
+
   return results;
 }
 
@@ -63,21 +63,21 @@ export async function processBatchImages(images, compressionOptions, onProgress)
  */
 export async function createZipFromImages(compressedResults, zipFileName = 'compressed_images.zip') {
   const zip = new JSZip();
-  
+
   // Add successful compressions to ZIP
   for (const result of compressedResults) {
     if (result.success && result.dataUrl) {
       try {
         // Convert data URL to binary
         const base64Data = result.dataUrl.split(',')[1];
-        
+
         // Convert base64 to binary string, then to bytes
         const binaryString = atob(base64Data);
         const bytes = new Uint8Array(binaryString.length);
         for (let i = 0; i < binaryString.length; i++) {
           bytes[i] = binaryString.charCodeAt(i);
         }
-        
+
         // Add to ZIP with the filename
         zip.file(result.fileName, bytes);
       } catch (error) {
@@ -85,14 +85,14 @@ export async function createZipFromImages(compressedResults, zipFileName = 'comp
       }
     }
   }
-  
+
   // Generate ZIP file with compression
-  const zipBlob = await zip.generateAsync({ 
+  const zipBlob = await zip.generateAsync({
     type: 'blob',
     compression: 'DEFLATE',
     compressionOptions: { level: 6 }
   });
-  
+
   return zipBlob;
 }
 

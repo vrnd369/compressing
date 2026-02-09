@@ -1,3 +1,5 @@
+import imageCompression from 'browser-image-compression';
+
 /**
  * Image compression utilities
  */
@@ -48,138 +50,137 @@ export const COMPRESSION_PRESETS = {
  */
 export function formatFileSize(bytes) {
   if (bytes === 0) return '0 Bytes';
-  
+
   const k = 1024;
   const sizes = ['Bytes', 'KB', 'MB', 'GB'];
   const i = Math.floor(Math.log(bytes) / Math.log(k));
-  
+
   return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
 }
 
 /**
- * Compress an image with the given options
- * @param {string} imageDataUrl - Base64 data URL of the image
+ * Helper to convert Data URL to File object
+ */
+async function dataURLtoFile(dataurl, filename) {
+  const arr = dataurl.split(',');
+  const mime = arr[0].match(/:(.*?);/)[1];
+  const bstr = atob(arr[1]);
+  let n = bstr.length;
+  const u8arr = new Uint8Array(n);
+  while (n--) {
+    u8arr[n] = bstr.charCodeAt(n);
+  }
+  return new File([u8arr], filename, { type: mime });
+}
+
+/**
+ * Helper to convert File to Data URL
+ */
+function fileToDataURL(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = error => reject(error);
+  });
+}
+
+/**
+ * Helper to load image
+ */
+function loadImage(src) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = reject;
+    img.src = src;
+  });
+}
+
+/**
+ * Compress an image with the given options using browser-image-compression
+ * @param {string|File} imageInput - Base64 data URL or File object of the image
  * @param {Object} options - Compression options
- * @param {number} options.maxWidth - Maximum width in pixels
- * @param {number} options.maxHeight - Maximum height in pixels
- * @param {number} options.quality - Quality (0-1)
- * @param {string} options.format - Output format (image/jpeg, image/png, image/webp)
- * @param {boolean} options.maintainAspectRatio - Whether to maintain aspect ratio
  * @returns {Promise<Object>} Compression result with base64, stats, etc.
  */
-export function compressImage(imageDataUrl, options = {}) {
-  return new Promise((resolve, reject) => {
-    try {
-      const {
-        maxWidth = 800,
-        maxHeight = 800,
-        quality = 0.8,
-        format = 'image/jpeg',
-        maintainAspectRatio = true
-      } = options;
+export async function compressImage(imageInput, options = {}) {
+  try {
+    const {
+      maxWidth = 1920,
+      maxHeight = 1920,
+      quality = 0.8,
+      format = 'image/jpeg',
+      maintainAspectRatio = true
+    } = options;
 
-      // Create an image element to load the image
-      const img = new Image();
-      
-      img.onload = () => {
-        try {
-          // Get original dimensions
-          const originalWidth = img.width;
-          const originalHeight = img.height;
-          
-          // Calculate new dimensions
-          let newWidth = originalWidth;
-          let newHeight = originalHeight;
-          
-          // Only resize if dimensions exceed max dimensions (or if maxWidth/maxHeight are not extremely high)
-          if (maxWidth > 0 && maxHeight > 0 && maxWidth < 9999 && maxHeight < 9999) {
-            if (maintainAspectRatio) {
-              const aspectRatio = originalWidth / originalHeight;
-              
-              if (originalWidth > maxWidth || originalHeight > maxHeight) {
-                if (originalWidth > originalHeight) {
-                  newWidth = Math.min(originalWidth, maxWidth);
-                  newHeight = Math.round(newWidth / aspectRatio);
-                  
-                  if (newHeight > maxHeight) {
-                    newHeight = maxHeight;
-                    newWidth = Math.round(newHeight * aspectRatio);
-                  }
-                } else {
-                  newHeight = Math.min(originalHeight, maxHeight);
-                  newWidth = Math.round(newHeight * aspectRatio);
-                  
-                  if (newWidth > maxWidth) {
-                    newWidth = maxWidth;
-                    newHeight = Math.round(newWidth / aspectRatio);
-                  }
-                }
-              }
-            } else {
-              newWidth = Math.min(originalWidth, maxWidth);
-              newHeight = Math.min(originalHeight, maxHeight);
-            }
-          }
-          
-          // Create canvas and draw image
-          const canvas = document.createElement('canvas');
-          canvas.width = newWidth;
-          canvas.height = newHeight;
-          
-          const ctx = canvas.getContext('2d');
-          
-          // Improve image quality settings
-          // Enable high-quality image smoothing for better results
-          ctx.imageSmoothingEnabled = true;
-          ctx.imageSmoothingQuality = 'high';
-          
-          // For downscaling, use better interpolation
-          // Draw image with proper quality settings
-          ctx.drawImage(img, 0, 0, newWidth, newHeight);
-          
-          // Convert to the desired format
-          // Note: PNG format doesn't support quality parameter
-          let compressedDataUrl;
-          if (format === 'image/png') {
-            // PNG doesn't support quality, always use highest quality
-            compressedDataUrl = canvas.toDataURL(format);
-          } else {
-            // JPEG and WebP support quality parameter
-            compressedDataUrl = canvas.toDataURL(format, quality);
-          }
-          
-          // Calculate sizes
-          const originalSize = getBase64Size(imageDataUrl);
-          const compressedSize = getBase64Size(compressedDataUrl);
-          const compressionRatio = ((1 - compressedSize / originalSize) * 100).toFixed(1);
-          
-          // Resolve with result
-          resolve({
-            base64: compressedDataUrl,
-            width: newWidth,
-            height: newHeight,
-            format: format,
-            quality: quality,
-            originalSize: originalSize,
-            compressedSize: compressedSize,
-            compressionRatio: compressionRatio,
-            originalWidth: originalWidth,
-            originalHeight: originalHeight
-          });
-        } catch (error) {
-          reject(new Error(`Compression error: ${error.message}`));
-        }
-      };
-      
-      img.onerror = () => {
-        reject(new Error('Failed to load image'));
-      };
-      
-      img.src = imageDataUrl;
-    } catch (error) {
-      reject(new Error(`Error processing image: ${error.message}`));
+    let imageFile;
+    let originalWidth, originalHeight;
+
+    // Handle input type and get original dimensions
+    if (typeof imageInput === 'string') {
+      // Input is base64 string
+      const img = await loadImage(imageInput);
+      originalWidth = img.width;
+      originalHeight = img.height;
+
+      // Convert to File for browser-image-compression
+      imageFile = await dataURLtoFile(imageInput, 'image.' + (format.split('/')[1] || 'jpg'));
+    } else {
+      // Input is File object
+      const objectUrl = URL.createObjectURL(imageInput);
+      try {
+        const img = await loadImage(objectUrl);
+        originalWidth = img.width;
+        originalHeight = img.height;
+      } finally {
+        URL.revokeObjectURL(objectUrl);
+      }
+      imageFile = imageInput;
     }
-  });
+
+    // Prepare options for browser-image-compression
+    // Note: browser-image-compression uses maxWidthOrHeight, so we take the larger dimension
+    // to ensure neither exceeds the limit while maintaining aspect ratio.
+    const compressionConfig = {
+      maxSizeMB: 100, // Effectively unlimited size, controlled by quality/resolution
+      maxWidthOrHeight: Math.max(maxWidth, maxHeight),
+      useWebWorker: true,
+      fileType: format,
+      initialQuality: quality,
+      alwaysKeepResolution: false // Allow downscaling
+    };
+
+    // Compress
+    const compressedFile = await imageCompression(imageFile, compressionConfig);
+
+    // Convert result back to Data URL for compatibility
+    const compressedDataUrl = await fileToDataURL(compressedFile);
+
+    // Get dimensions of compressed image (needs loading)
+    const compressedImg = await loadImage(compressedDataUrl);
+
+    // Calculate sizes
+    const originalSize = imageFile.size;
+    const compressedSize = compressedFile.size;
+    const compressionRatio = ((1 - compressedSize / originalSize) * 100).toFixed(1);
+
+    return {
+      base64: compressedDataUrl,
+      width: compressedImg.width,
+      height: compressedImg.height,
+      format: format,
+      quality: quality,
+      originalSize: originalSize,
+      compressedSize: compressedSize,
+      compressionRatio: compressionRatio,
+      originalWidth: originalWidth,
+      originalHeight: originalHeight
+    };
+
+  } catch (error) {
+    console.error('Compression details:', error);
+    throw new Error(`Compression error: ${error.message}`);
+  }
 }
 
 /**
@@ -190,7 +191,7 @@ export function compressImage(imageDataUrl, options = {}) {
 function getBase64Size(base64) {
   // Remove data URL prefix if present
   const base64String = base64.includes(',') ? base64.split(',')[1] : base64;
-  
+
   // Calculate size: base64 encoding increases size by ~33%
   // Formula: (base64String.length * 3) / 4
   return Math.round((base64String.length * 3) / 4);

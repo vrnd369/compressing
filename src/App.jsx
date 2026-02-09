@@ -17,7 +17,7 @@ function App() {
   const handleImageSelect = (event) => {
     const files = Array.from(event.target.files);
     const imageFiles = files.filter(file => file.type.startsWith('image/'));
-    
+
     if (imageFiles.length === 0) {
       alert('Please select valid image files');
       return;
@@ -88,19 +88,26 @@ function App() {
   };
 
   const handleDownloadZip = async () => {
-    if (compressedResults.length === 0) {
-      alert('Please compress images first');
+    const successfulResults = compressedResults.filter(r => r.success);
+    if (successfulResults.length === 0) {
+      alert('No successfully compressed images to download');
       return;
     }
 
     try {
-      const zipBlob = await createZipFromImages(compressedResults);
-      const format = compressionOptions.format || 'image/jpeg';
-      const extension = format === 'image/png' ? 'png' : 
-                       format === 'image/webp' ? 'webp' : 'jpg';
-      downloadBlob(zipBlob, `compressed_images_${Date.now()}.zip`);
+      if (successfulResults.length === 1) {
+        // Download single file directly
+        const result = successfulResults[0];
+        const res = await fetch(result.dataUrl);
+        const blob = await res.blob();
+        downloadBlob(blob, result.fileName);
+      } else {
+        // Download as ZIP
+        const zipBlob = await createZipFromImages(compressedResults);
+        downloadBlob(zipBlob, `compressed_images_${Date.now()}.zip`);
+      }
     } catch (error) {
-      alert('Error creating ZIP file: ' + error.message);
+      alert('Error creating download: ' + error.message);
     }
   };
 
@@ -158,11 +165,11 @@ function App() {
                 className="file-input"
               />
               <label htmlFor="image-upload" className="upload-label">
-                {selectedImages.length > 0 
-                  ? `📁 ${selectedImages.length} Image${selectedImages.length > 1 ? 's' : ''} Selected` 
+                {selectedImages.length > 0
+                  ? `📁 ${selectedImages.length} Image${selectedImages.length > 1 ? 's' : ''} Selected`
                   : '📁 Choose Images (Multiple)'}
               </label>
-              
+
               {selectedImages.length > 0 && (
                 <div className="images-list">
                   <h3>Selected Images ({selectedImages.length})</h3>
@@ -171,7 +178,7 @@ function App() {
                       <div key={index} className="image-item">
                         <div className="image-item-preview">
                           <img src={img.dataUrl} alt={img.name} />
-                          <button 
+                          <button
                             className="remove-image-btn"
                             onClick={() => handleRemoveImage(index)}
                             title="Remove image"
@@ -181,7 +188,7 @@ function App() {
                         </div>
                         <div className="image-item-info">
                           <p className="image-name" title={img.name}>{img.name}</p>
-                          <button 
+                          <button
                             className="preview-single-btn"
                             onClick={() => handleShowPreview(img.dataUrl)}
                           >
@@ -191,32 +198,32 @@ function App() {
                       </div>
                     ))}
                   </div>
-                  
+
                   <div className="batch-actions">
-                    <button 
+                    <button
                       className="compress-all-btn"
                       onClick={handleBatchCompress}
                       disabled={isProcessing || selectedImages.length === 0}
                     >
-                      {isProcessing 
-                        ? `🔄 Processing... (${processingProgress.current}/${processingProgress.total})` 
+                      {isProcessing
+                        ? `🔄 Processing... (${processingProgress.current}/${processingProgress.total})`
                         : `🗜️ Compress All Images`}
                     </button>
-                    
+
                     {compressedResults.length > 0 && (
                       <div className="compression-results">
                         <div className="results-summary">
                           <p>✅ Successfully compressed: {getSuccessCount()} of {compressedResults.length}</p>
                           {getSuccessCount() > 0 && (
-                            <button 
+                            <button
                               className="download-zip-btn"
                               onClick={handleDownloadZip}
                             >
-                              📦 Download All as ZIP
+                              {getSuccessCount() === 1 ? '📦 Download Image' : '📦 Download All as ZIP'}
                             </button>
                           )}
                         </div>
-                        
+
                         {/* Individual Image Stats */}
                         {compressedResults.filter(r => r.success).length > 0 && (
                           <div className="image-stats-list">
@@ -235,10 +242,10 @@ function App() {
                                   const originalSize = result.originalSize || (result.stats?.originalSize || 0);
                                   const compressedSize = result.stats?.compressedSize || 0;
                                   const saved = originalSize - compressedSize;
-                                  const ratio = originalSize > 0 
-                                    ? ((1 - compressedSize / originalSize) * 100).toFixed(1) 
+                                  const ratio = originalSize > 0
+                                    ? ((1 - compressedSize / originalSize) * 100).toFixed(1)
                                     : 0;
-                                  
+
                                   return (
                                     <div key={index} className="stats-row">
                                       <div className="stats-col-name" title={result.originalName}>
@@ -264,7 +271,7 @@ function App() {
                             </div>
                           </div>
                         )}
-                        
+
                         {compressedResults.some(r => !r.success) && (
                           <div className="error-summary">
                             <p>❌ Failed images:</p>
